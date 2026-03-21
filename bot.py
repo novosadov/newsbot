@@ -2,12 +2,13 @@ import os
 import asyncio
 import aiohttp
 import feedparser
+import re  # Библиотека для регулярных выражений (очистка текста)
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 import sqlite3
 
 # ==========================================
-# 1. ПОЛУЧЕНИЕ И ПРОВЕРКА ТОКЕНА (ДИАГНОСТИКА)
+# 1. ПОЛУЧЕНИЕ И ПРОВЕРКА ТОКЕНА
 # ==========================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -15,40 +16,27 @@ print("🚀 ЗАПУСК ДИАГНОСТИКИ СИСТЕМЫ...")
 
 if not BOT_TOKEN:
     print("❌ КРИТИЧЕСКАЯ ОШИБКА: Переменная окружения BOT_TOKEN пуста!")
-    print("   Проверьте: Settings -> Secrets and variables -> Actions.")
-    print("   Убедитесь, что имя секрета точно: BOT_TOKEN")
     exit(1)
 
-# Очищаем от возможных пробелов и переносов строк по краям
+# Очищаем от пробелов
 BOT_TOKEN = BOT_TOKEN.strip()
 
-print(f"✅ Токен получен из среды.")
-print(f"📏 Длина токена: {len(BOT_TOKEN)} символов.")
-print(f"👁️  Первые 15 символов: {BOT_TOKEN[:15]}...")
-print(f"👁️  Последние 10 символов: ...{BOT_TOKEN[-10:]}")
+print(f"✅ Токен получен. Длина: {len(BOT_TOKEN)}")
+print(f"👁️  Начало токена: {BOT_TOKEN[:10]}...")
 
-# Проверка структуры (должно быть ЧИСЛО:БУКВЫ)
+# Проверка структуры
 parts = BOT_TOKEN.split(':')
-if len(parts) != 2:
-    print(f"❌ ОШИБКА ФОРМАТА: Ожидается формат 'ID:SECRET' (одно двоеточие).")
-    print(f"   Найдено частей после разделения по ':': {len(parts)}")
-    print(f"   Возможно, вы скопировали лишний текст или пробелы внутри токена.")
-    print(f"   Полное содержимое переменной: [{BOT_TOKEN}]")
+if len(parts) != 2 or not parts[0].isdigit():
+    print(f"❌ ОШИБКА ФОРМАТА ТОКЕНА!")
     exit(1)
 
-bot_id, secret_part = parts
-if not bot_id.isdigit():
-    print(f"❌ ОШИБКА: Первая часть (ID) должна состоять только из цифр.")
-    print(f"   Получено: '{bot_id}'")
-    exit(1)
-
-print("✅ Структура токена валидна. Попытка инициализации бота...")
+print("✅ Структура токена валидна.")
 
 # ==========================================
-# 2. НАСТРОЙКИ КАНАЛА И ИСТОЧНИКОВ
+# 2. НАСТРОЙКИ
 # ==========================================
-# Замените на ID вашего канала (например, '@my_tech_news' или '-100123456789')
-CHANNEL_ID = "@newstecnolojia" # <-- ВПИШИТЕ СЮДА ВАШ КАНАЛ (с @ или числовой ID)
+# ВПИШИТЕ СЮДА ИМЯ ВАШЕГО КАНАЛА (с @)
+CHANNEL_ID = "@newstecnolojia" 
 
 RSS_FEEDS = [
     "https://habr.com/ru/rss/all/new/",
@@ -56,10 +44,8 @@ RSS_FEEDS = [
     "https://vc.ru/feed",
 ]
 
-CHECK_INTERVAL = 600  # 10 минут
-
 # ==========================================
-# 3. РАБОТА С БАЗОЙ ДАННЫХ (SQLite)
+# 3. БАЗА ДАННЫХ
 # ==========================================
 def init_db():
     conn = sqlite3.connect('news.db')
@@ -84,83 +70,81 @@ def save_news(link):
     conn.close()
 
 # ==========================================
-# 4. ЛОГИКА ПАРСИНГА НОВОСТЕЙ
+# 4. ПАРСИНГ И ОЧИСТКА НОВОСТЕЙ
 # ==========================================
 async def fetch_news(session):
     new_posts = []
-    # Для примера берем первый фид из списка. 
-    # В продакшене можно сделать цикл по всем feeds.
-    url = RSS_FEEDS[0] 
+    url = RSS_FEEDS[0] # Берем первый источник (Хабр)
+    
     try:
         async with session.get(url, timeout=10) as response:
             if response.status == 200:
                 text = await response.text()
                 feed = feedparser.parse(text)
                 
-                # Берем последние 3 новости, чтобы не спамить при первом запуске
-                for entry in feed.entries[:3]:
+                for entry in feed.entries[:3]: # Берем 3 последние новости
                     link = entry.link
                     if not is_posted(link):
                         title = entry.title
-                        # Очищаем описание от HTML тегов для краткости
-                        summary_raw = entry.get('summary', '')
-                        # Простая очистка от тегов (можно усложнить при необходимости)
-                        summary = "".join([s for s in summary_raw.split() if not s.startswith('<')])[:200]
-                        if len(summary_raw) > 200: summary += "..."
+                        summary_raw = entry.get('summary', 'Нет описания.')
                         
-                        message = f"🚀 <b>{title}</b>\n\n📝 {summary}\n\n🔗 <a href='{link}'>Читать далее</a>"
+                        # === ОЧИСТКА ОТ HTML ТЕГОВ ===
+                        # Удаляем все теги вида <...>
+                        clean_summary = re.sub(r'<[^>]+>', '', summary_raw)
+                        
+                        # Заменяем переносы строк на пробелы, чтобы текст был сплошным
+                        clean_summary = clean_summary.replace('\n', ' ').replace('\r', ' ')
+                        
+                        # Обрезаем длинный текст
+                        if len(clean_summary) > 250:
+                            clean_summary = clean_summary[:247] + "..."
+                        
+                        # Формируем сообщение. 
+                        # Внимание: в заголовке и ссылке используем теги Telegram (<b>, <a>),
+                        # а в тексте только чистый текст без тегов.
+                        message = f"🚀 <b>{title}</b>\n\n📝 {clean_summary}\n\n🔗 <a href='{link}'>Читать далее</a>"
+                        
                         new_posts.append(message)
                         save_news(link)
-                        print(f"📰 Подготовлена новость: {title[:30]}...")
+                        print(f"📰 Новость готова: {title[:40]}...")
             else:
-                print(f"⚠️ Ошибка доступа к ленте {url}: Статус {response.status}")
+                print(f"⚠️ Ошибка доступа к ленте: Статус {response.status}")
     except Exception as e:
-        print(f"⚠️ Ошибка при парсинге ленты: {e}")
+        print(f"⚠️ Ошибка при парсинге: {e}")
         
     return new_posts
 
 # ==========================================
-# 5. ОСНОВНОЙ ЦИКЛ
+# 5. ОСНОВНОЙ ЗАПУСК
 # ==========================================
 async def main():
-    # Инициализация бота (теперь мы уверены, что токен валиден по структуре)
     try:
         bot = Bot(token=BOT_TOKEN)
-        # Проверка связи с Telegram (получаем инфо о боте)
         me = await bot.get_me()
-        print(f"✅ УСПЕХ! Бот запущен: @{me.username} (ID: {me.id})")
+        print(f"✅ УСПЕХ! Бот запущен: @{me.username}")
     except Exception as e:
-        print(f"❌ НЕУДАЧА ПРИ ПОДКЛЮЧЕНИИ К TELEGRAM: {e}")
-        print("   Возможные причины:")
-        print("   1. Токен отозван (сделайте /revoke и создайте новый).")
-        print("   2. Токен содержит скрытые символы, которые не удалось отловить.")
+        print(f"❌ ОШИБКА ЗАПУСКА БОТА: {e}")
         return
 
     init_db()
     
     async with aiohttp.ClientSession() as session:
-        # Первый прогон сразу при старте
-        print("🔄 Выполнение первого сканирования лент...")
+        print("🔄 Сканирование лент...")
         posts = await fetch_news(session)
         
         if posts:
-            print(f"📤 Отправка {len(posts)} новостей в канал {CHANNEL_ID}...")
+            print(f"📤 Отправка {len(posts)} новостей в {CHANNEL_ID}...")
             for post in posts:
                 try:
                     await bot.send_message(CHANNEL_ID, post, parse_mode=ParseMode.HTML)
-                    print("   ✅ Новость отправлена.")
+                    print("   ✅ Отправлено успешно!")
                 except Exception as e:
                     print(f"   ❌ Ошибка отправки: {e}")
-                    print("   Проверьте: добавлен ли бот в канал как АДМИНИСТРАТОР?")
         else:
-            print("ℹ️ Новых новостей для публикации не найдено.")
+            print("ℹ️ Новых новостей нет.")
 
-        print("💤 Завершение работы (GitHub Actions остановит процесс).")
-    
     await bot.session.close()
+    print("💤 Работа завершена.")
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Остановлено пользователем.")
+    asyncio.run(main())
