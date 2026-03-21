@@ -11,38 +11,42 @@ from aiogram.enums import ParseMode
 # КОНФИГУРАЦИЯ
 # ==========================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = "@newstecnolojia" # Ваш канал
+CHANNEL_ID = "@newstecnolojia"
 MEMORY_FILE = "sent_links.txt"
-MAX_HISTORY = 100 # Храним последние 100 ссылок для памяти
+MAX_HISTORY = 200
 
-# СПИСОК ИСТОЧНИКОВ (МАКСИМАЛЬНО ПОЛНЫЙ)
+# СПИСОК ИСТОЧНИКОВ (ТОЛЬКО РУССКИЙ СЕКТОР + ПРОВЕРЕННЫЕ ССЫЛКИ)
 RSS_FEEDS = [
-    # --- РОССИЯ ---
-    ("Habr (Все)", "https://habr.com/ru/rss/all/new/"),
-    ("VC.ru (Технологии)", "https://vc.ru/feed"),
+    ("Habr", "https://habr.com/ru/rss/all/new/"),
+    ("VC.ru", "https://vc.ru/feed"), # Основной фид, часто работает
     ("TJournal", "https://tjournal.ru/feed"),
     ("CNews", "https://www.cnews.ru/news/index.rss"),
-    ("iXBT.com", "https://www.ixbt.com/news/all/index.xml"),
+    ("iXBT", "https://www.ixbt.com/news/all/index.xml"),
     ("3DNews", "https://www.3dnews.ru/news.rdf"),
-    ("Overclockers.ru", "https://overclockers.ru/rss/news.xml"),
+    ("Overclockers", "https://overclockers.ru/rss/news.xml"),
     ("OpenNET", "https://www.opennet.ru/opennews/opennews_all.rss"),
-    
-    # --- МИР (ENGLISH) ---
-    ("TechCrunch", "https://techcrunch.com/feed/"),
-    ("The Verge", "https://www.theverge.com/rss/index.xml"),
-    ("Wired", "https://www.wired.com/feed/rss"),
-    ("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index"),
-    ("Hacker News (Top)", "https://hnrss.org/frontpage"),
-    ("MIT Technology Review", "https://www.technologyreview.com/feed/"),
-    ("Engadget", "https://www.engadget.com/rss.xml"),
-    ("ZDNet", "https://www.zdnet.com/topic/technology/rss.xml"),
-    ("The Next Web", "https://thenextweb.com/feed/"),
+    ("CyberSecurity", "https://cybersecurity.ru/rss.php"), # Дополнительный источник
+    ("Roem", "https://roem.ru/feed/"), # Бизнес и IT
 ]
 
-print(f"🚀 ЗАПУСК БОТА. Источников: {len(RSS_FEEDS)}")
+print(f"🇷🇺 ЗАПУСК БОТА (RU ONLY). Источников: {len(RSS_FEEDS)}")
 
 # ==========================================
-# РАБОТА С ПАМЯТЬЮ (GIT)
+# ФИЛЬТР РУССКОГО ЯЗЫКА
+# ==========================================
+def has_cyrillic(text):
+    """Проверяет наличие хотя бы одной русской буквы"""
+    return bool(re.search('[а-яА-ЯёЁ]', text))
+
+def is_russian_news(title, summary):
+    # Проверяем заголовок. Если нет русских букв - пропускаем сразу.
+    if not has_cyrillic(title):
+        return False
+    # Если заголовок русский, но описание совсем пустое - тоже ок, берем.
+    return True
+
+# ==========================================
+# РАБОТА С ПАМЯТЬЮ
 # ==========================================
 def load_history():
     if not os.path.exists(MEMORY_FILE):
@@ -60,122 +64,120 @@ def save_history(history_set):
             f.write(link + '\n')
     
     try:
-        # Настройка Git пользователя
         subprocess.run(["git", "config", "--global", "user.name", "NewsBot"], check=True, capture_output=True)
         subprocess.run(["git", "config", "--global", "user.email", "bot@github.actions"], check=True, capture_output=True)
         
-        # Проверка, есть ли изменения
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
         if status.stdout.strip():
             subprocess.run(["git", "add", MEMORY_FILE], check=True, capture_output=True)
-            subprocess.run(["git", "commit", "-m", "Update news history"], check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "Update RU news history"], check=True, capture_output=True)
             
             repo_url = os.getenv("GITHUB_SERVER_URL") + "/" + os.getenv("GITHUB_REPOSITORY") + ".git"
             token = os.getenv("GITHUB_TOKEN")
             auth_url = repo_url.replace("https://", f"https://x-access-token:{token}@")
             
             subprocess.run(["git", "push", auth_url, "HEAD:main"], check=True, capture_output=True)
-            print("✅ История обновлена в репозитории.")
-        else:
-            print("ℹ️ Изменений в истории нет.")
+            print("✅ История обновлена.")
     except Exception as e:
-        print(f"⚠️ Ошибка сохранения в Git: {e}")
+        print(f"⚠️ Git error: {e}")
 
 # ==========================================
-# ПАРСИНГ И ОТПРАВКА
+# ОСНОВНОЙ ЦИКЛ
 # ==========================================
 async def fetch_and_post():
     if not BOT_TOKEN:
-        print("❌ Токен не найден!")
+        print("❌ Нет токена!")
         return
 
     bot = Bot(token=BOT_TOKEN)
     history = load_history()
-    new_links_count = 0
-
-    # Создаем сессию с заголовками, чтобы сайты не блокировали бота
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    new_count = 0
     
+    # Заголовки как у браузера, чтобы не блокировали
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
     async with aiohttp.ClientSession(headers=headers) as session:
         for source_name, url in RSS_FEEDS:
             try:
-                # Таймаут уменьшен для скорости, если один сайт висит - идем дальше
-                async with session.get(url, timeout=5) as response:
+                # Таймаут 7 секунд на сайт
+                async with session.get(url, timeout=7) as response:
                     if response.status == 200:
-                        text = await response.text()
+                        # Читаем текст. Для OpenNET и других важна правильная кодировка
+                        content_type = response.headers.get('Content-Type', '')
+                        text = await response.text(errors='ignore') # Игнорируем битые байты
+                        
                         feed = feedparser.parse(text)
                         
-                        # Берем по 2 новости с каждого источника, чтобы не спамить одним сайтом
-                        for entry in feed.entries[:2]: 
+                        # Берем топ-3 свежих с каждого источника
+                        for entry in feed.entries[:3]:
                             link = entry.link
                             if link in history:
                                 continue
 
-                            # Обработка текста
                             title = entry.title
                             summary_raw = entry.get('summary', entry.get('description', ''))
-                            
-                            # Чистка HTML
+
+                            # === ФИЛЬТР ЯЗЫКА ===
+                            if not is_russian_news(title, summary_raw):
+                                # print(f"⏭ [{source_name}] Пропущено (не русский): {title[:20]}")
+                                continue
+
+                            # Чистка текста
                             clean_summary = re.sub(r'<[^>]+>', '', summary_raw)
-                            clean_summary = re.sub(r'\s+', ' ', clean_summary) # Убираем лишние пробелы
-                            clean_summary = clean_summary.strip()
+                            clean_summary = re.sub(r'\s+', ' ', clean_summary).strip()
                             
-                            if len(clean_summary) > 500:
-                                clean_summary = clean_summary[:497] + "..."
+                            if len(clean_summary) > 600:
+                                clean_summary = clean_summary[:597] + "..."
                             
-                            if not clean_summary or clean_summary == "Нет описания.":
-                                clean_summary = "Подробности по ссылке в источнике."
+                            if not clean_summary:
+                                clean_summary = "Подробности в источнике."
 
                             # Поиск картинки
                             photo_url = None
                             # 1. media_content
                             if 'media_content' in entry:
-                                for media in entry['media_content']:
-                                    if media.get('medium') == 'image' or media.get('type', '').startswith('image'):
-                                        photo_url = media['url']
+                                for m in entry['media_content']:
+                                    if m.get('medium') == 'image' or m.get('type', '').startswith('image'):
+                                        photo_url = m['url']
                                         break
                             # 2. enclosures
                             if not photo_url and 'enclosures' in entry:
-                                for enc in entry['enclosures']:
-                                    if enc.get('type', '').startswith('image'):
-                                        photo_url = enc['href']
+                                for e in entry['enclosures']:
+                                    if e.get('type', '').startswith('image'):
+                                        photo_url = e['href']
                                         break
-                            # 3. image в корне entry
-                            if not photo_url and 'image' in entry:
-                                photo_url = entry['image'].get('href')
-                            
-                            # 4. Парсинг из HTML summary (fallback)
+                            # 3. Парсинг из HTML
                             if not photo_url:
-                                img_match = re.search(r'src=["\'](https?://[^"\']+?\.(?:jpg|jpeg|png|webp|gif))["\']', summary_raw, re.I)
-                                if img_match:
-                                    photo_url = img_match.group(1)
+                                match = re.search(r'src=["\'](https?://[^"\']+?\.(?:jpg|jpeg|png|webp))["\']', summary_raw, re.I)
+                                if match:
+                                    photo_url = match.group(1)
 
                             caption = f"🏷 <b>{source_name}</b>\n\n🚀 <b>{title}</b>\n\n📝 {clean_summary}"
                             
                             try:
                                 if photo_url:
                                     await bot.send_photo(CHANNEL_ID, photo=photo_url, caption=caption, parse_mode=ParseMode.HTML)
-                                    print(f"📸 [{source_name}] {title[:30]}...")
+                                    print(f"📸 [{source_name}] {title[:40]}...")
                                 else:
                                     await bot.send_message(CHANNEL_ID, caption, parse_mode=ParseMode.HTML)
-                                    print(f"📝 [{source_name}] {title[:30]}...")
+                                    print(f"📝 [{source_name}] {title[:40]}...")
                                 
                                 history.add(link)
-                                new_links_count += 1
+                                new_count += 1
                             except Exception as e:
-                                print(f"❌ Ошибка отправки в Telegram: {e}")
+                                print(f"❌ Ошибка отправки: {e}")
                     else:
-                        print(f"⚠️ {source_name}: Статус {response.status}")
+                        print(f"⚠️ [{source_name}] Ошибка доступа: {response.status}")
             except asyncio.TimeoutError:
-                print(f"⏳ {source_name}: Превышено время ожидания, пропускаем.")
+                print(f"⏳ [{source_name}] Таймаут (сайт долго отвечает)")
             except Exception as e:
-                print(f"⚠️ {source_name}: Ошибка чтения ({e})")
+                print(f"⚠️ [{source_name}] Критическая ошибка: {e}")
 
-    if new_links_count > 0:
+    if new_count > 0:
         save_history(history)
-        print(f"✅ Готово! Отправлено новостей: {new_links_count}")
+        print(f"✅ УСПЕХ! Отправлено русских новостей: {new_count}")
     else:
-        print("ℹ️ Новых новостей не найдено.")
+        print("ℹ️ Новых русских новостей пока нет (или все повторятся).")
 
     await bot.session.close()
 
