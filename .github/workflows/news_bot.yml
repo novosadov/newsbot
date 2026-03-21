@@ -1,0 +1,21 @@
+name: News Bot Runner
+on:
+  schedule:
+    - cron: '*/15 * * * *' # Запуск каждые 15 минут
+  workflow_dispatch: # Возможность ручного запуска
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python bot.py
