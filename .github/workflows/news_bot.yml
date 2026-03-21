@@ -1,21 +1,31 @@
 name: News Bot Runner
+
 on:
   schedule:
-    - cron: '*/15 * * * *' # Запуск каждые 15 минут
-  workflow_dispatch: # Возможность ручного запуска
+    - cron: '*/1 * * * *' # Каждые 1 минуту
+  workflow_dispatch: # Ручной запуск
+
+# ВАЖНО: Даем права на запись в репозиторий
+permissions:
+  contents: write
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3 # Скачиваем репозиторий (чтобы видеть sent_links.txt)
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+          
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install aiohttp feedparser aiogram
+          
       - name: Run Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Токен для записи в репо
         run: python bot.py
