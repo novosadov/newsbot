@@ -1,11 +1,10 @@
-name: News Bot Runner
+name: News Bot Runner (RU)
 
 on:
   schedule:
-    - cron: '*/1 * * * *' # Каждые 1 минуту
-  workflow_dispatch: # Ручной запуск
+    - cron: '*/5 * * * *' # Каждые 5 минут
+  workflow_dispatch:
 
-# ВАЖНО: Даем права на запись в репозиторий
 permissions:
   contents: write
 
@@ -13,7 +12,7 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3 # Скачиваем репозиторий (чтобы видеть sent_links.txt)
+      - uses: actions/checkout@v3
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -27,5 +26,5 @@ jobs:
       - name: Run Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Токен для записи в репо
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python bot.py
