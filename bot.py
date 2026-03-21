@@ -2,149 +2,148 @@ import os
 import asyncio
 import aiohttp
 import feedparser
-import re  # Библиотека для регулярных выражений (очистка текста)
-from aiogram import Bot, Dispatcher, types
+import re
+from aiogram import Bot, types
 from aiogram.enums import ParseMode
-import sqlite3
+import subprocess # Для работы с Git
 
 # ==========================================
-# 1. ПОЛУЧЕНИЕ И ПРОВЕРКА ТОКЕНА
+# 1. НАСТРОЙКИ И ПАМЯТЬ (GIT)
 # ==========================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = "@newstecnolojia" # Ваш канал
 
-print("🚀 ЗАПУСК ДИАГНОСТИКИ СИСТЕМЫ...")
-
-if not BOT_TOKEN:
-    print("❌ КРИТИЧЕСКАЯ ОШИБКА: Переменная окружения BOT_TOKEN пуста!")
-    exit(1)
-
-# Очищаем от пробелов
-BOT_TOKEN = BOT_TOKEN.strip()
-
-print(f"✅ Токен получен. Длина: {len(BOT_TOKEN)}")
-print(f"👁️  Начало токена: {BOT_TOKEN[:10]}...")
-
-# Проверка структуры
-parts = BOT_TOKEN.split(':')
-if len(parts) != 2 or not parts[0].isdigit():
-    print(f"❌ ОШИБКА ФОРМАТА ТОКЕНА!")
-    exit(1)
-
-print("✅ Структура токена валидна.")
-
-# ==========================================
-# 2. НАСТРОЙКИ
-# ==========================================
-# ВПИШИТЕ СЮДА ИМЯ ВАШЕГО КАНАЛА (с @)
-CHANNEL_ID = "@newstecnolojia" 
+# Файл для хранения истории ссылок (чтобы не было дублей)
+MEMORY_FILE = "sent_links.txt"
+MAX_HISTORY = 50 # Храним последние 50 ссылок
 
 RSS_FEEDS = [
     "https://habr.com/ru/rss/all/new/",
-    "https://www.techcrunch.com/feed/",
-    "https://vc.ru/feed",
 ]
 
-# ==========================================
-# 3. БАЗА ДАННЫХ
-# ==========================================
-def init_db():
-    conn = sqlite3.connect('news.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS posted_news (link TEXT PRIMARY KEY)''')
-    conn.commit()
-    conn.close()
+print("🚀 ЗАПУСК БОТА С ФОТО-РЕЖИМОМ...")
 
-def is_posted(link):
-    conn = sqlite3.connect('news.db')
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM posted_news WHERE link=?", (link,))
-    result = c.fetchone()
-    conn.close()
-    return result is not None
+# Функция загрузки истории из файла
+def load_history():
+    if not os.path.exists(MEMORY_FILE):
+        return set()
+    with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+        return set(line.strip() for line in f if line.strip())
 
-def save_news(link):
-    conn = sqlite3.connect('news.db')
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO posted_news VALUES (?)", (link,))
-    conn.commit()
-    conn.close()
-
-# ==========================================
-# 4. ПАРСИНГ И ОЧИСТКА НОВОСТЕЙ
-# ==========================================
-async def fetch_news(session):
-    new_posts = []
-    url = RSS_FEEDS[0] # Берем первый источник (Хабр)
+# Функция сохранения истории и коммит в Git
+def save_history(history_set):
+    history_list = list(history_set)[-MAX_HISTORY:] # Оставляем только последние
+    with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+        for link in history_list:
+            f.write(link + '\n')
     
+    # Автоматический коммит изменений в репозиторий
     try:
-        async with session.get(url, timeout=10) as response:
-            if response.status == 200:
-                text = await response.text()
-                feed = feedparser.parse(text)
-                
-                for entry in feed.entries[:3]: # Берем 3 последние новости
-                    link = entry.link
-                    if not is_posted(link):
-                        title = entry.title
-                        summary_raw = entry.get('summary', 'Нет описания.')
-                        
-                        # === ОЧИСТКА ОТ HTML ТЕГОВ ===
-                        # Удаляем все теги вида <...>
-                        clean_summary = re.sub(r'<[^>]+>', '', summary_raw)
-                        
-                        # Заменяем переносы строк на пробелы, чтобы текст был сплошным
-                        clean_summary = clean_summary.replace('\n', ' ').replace('\r', ' ')
-                        
-                        # Обрезаем длинный текст
-                        if len(clean_summary) > 250:
-                            clean_summary = clean_summary[:247] + "..."
-                        
-                        # Формируем сообщение. 
-                        # Внимание: в заголовке и ссылке используем теги Telegram (<b>, <a>),
-                        # а в тексте только чистый текст без тегов.
-                        message = f"🚀 <b>{title}</b>\n\n📝 {clean_summary}\n\n🔗 <a href='{link}'>Читать далее</a>"
-                        
-                        new_posts.append(message)
-                        save_news(link)
-                        print(f"📰 Новость готова: {title[:40]}...")
-            else:
-                print(f"⚠️ Ошибка доступа к ленте: Статус {response.status}")
-    except Exception as e:
-        print(f"⚠️ Ошибка при парсинге: {e}")
+        subprocess.run(["git", "config", "--global", "user.name", "NewsBot"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "bot@github.actions"], check=True)
+        subprocess.run(["git", "add", MEMORY_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update sent links history"], check=True)
+        # Push выполняем только если есть токены для git, но в GitHub Actions это часто лишнее, 
+        # так как файл нужен только для ТЕКУЩЕГО запуска? 
+        # НЕТ! Файл должен сохраниться для СЛЕДУЮЩЕГО запуска.
+        # В GitHub Actions файлы не сохраняются между запусками автоматически!
+        # Нам нужно запушить изменения обратно.
+        # Для этого нужен GITHUB_TOKEN. Он есть по умолчанию в env.
         
-    return new_posts
+        repo_url = os.getenv("GITHUB_SERVER_URL") + "/" + os.getenv("GITHUB_REPOSITORY") + ".git"
+        token = os.getenv("GITHUB_TOKEN")
+        auth_url = repo_url.replace("https://", f"https://x-access-token:{token}@")
+        
+        subprocess.run(["git", "push", auth_url, "HEAD:main"], check=True, capture_output=True)
+        print("✅ История ссылок обновлена в репозитории.")
+    except Exception as e:
+        print(f"⚠️ Не удалось сохранить историю в Git: {e}. Возможны дубли при следующем запуске.")
 
 # ==========================================
-# 5. ОСНОВНОЙ ЗАПУСК
+# 2. ОСНОВНАЯ ЛОГИКА
 # ==========================================
-async def main():
-    try:
-        bot = Bot(token=BOT_TOKEN)
-        me = await bot.get_me()
-        print(f"✅ УСПЕХ! Бот запущен: @{me.username}")
-    except Exception as e:
-        print(f"❌ ОШИБКА ЗАПУСКА БОТА: {e}")
+async def fetch_and_post():
+    if not BOT_TOKEN:
+        print("❌ Токен не найден!")
         return
 
-    init_db()
-    
+    bot = Bot(token=BOT_TOKEN)
+    history = load_history()
+    new_links = []
+
     async with aiohttp.ClientSession() as session:
-        print("🔄 Сканирование лент...")
-        posts = await fetch_news(session)
-        
-        if posts:
-            print(f"📤 Отправка {len(posts)} новостей в {CHANNEL_ID}...")
-            for post in posts:
-                try:
-                    await bot.send_message(CHANNEL_ID, post, parse_mode=ParseMode.HTML)
-                    print("   ✅ Отправлено успешно!")
-                except Exception as e:
-                    print(f"   ❌ Ошибка отправки: {e}")
-        else:
-            print("ℹ️ Новых новостей нет.")
+        for url in RSS_FEEDS:
+            try:
+                async with session.get(url, timeout=10) as response:
+                    if response.status == 200:
+                        text = await response.text()
+                        feed = feedparser.parse(text)
+                        
+                        for entry in feed.entries[:5]: # Проверяем 5 последних
+                            link = entry.link
+                            if link in history:
+                                continue # Уже отправлено
+
+                            # --- Обработка контента ---
+                            title = entry.title
+                            summary_raw = entry.get('summary', '')
+                            # Чистим HTML
+                            clean_summary = re.sub(r'<[^>]+>', '', summary_raw)
+                            clean_summary = clean_summary.replace('\n', ' ').replace('\r', ' ')
+                            if len(clean_summary) > 400:
+                                clean_summary = clean_summary[:397] + "..."
+
+                            # --- Поиск картинки ---
+                            photo_url = None
+                            # Вариант 1: media_content
+                            if 'media_content' in entry:
+                                for media in entry['media_content']:
+                                    if media.get('medium') == 'image' or media.get('type', '').startswith('image'):
+                                        photo_url = media['url']
+                                        break
+                            # Вариант 2: enclosures
+                            if not photo_url and 'enclosures' in entry:
+                                for enc in entry['enclosures']:
+                                    if enc.get('type', '').startswith('image'):
+                                        photo_url = enc['href']
+                                        break
+                            # Вариант 3: картинка внутри summary (ищем первый img src)
+                            if not photo_url:
+                                match = re.search(r'src=["\']([^"\']+\.jpg[^"\']*)["\']', summary_raw)
+                                if match:
+                                    photo_url = match.group(1)
+                                else:
+                                    match = re.search(r'src=["\']([^"\']+\.png[^"\']*)["\']', summary_raw)
+                                    if match:
+                                        photo_url = match.group(1)
+                            
+                            # --- Отправка ---
+                            caption = f"🚀 <b>{title}</b>\n\n📝 {clean_summary}"
+                            
+                            try:
+                                if photo_url:
+                                    await bot.send_photo(CHANNEL_ID, photo=photo_url, caption=caption, parse_mode=ParseMode.HTML)
+                                    print(f"📸 Отправлено фото: {title[:30]}...")
+                                else:
+                                    # Если картинки нет, шлем просто текст
+                                    await bot.send_message(CHANNEL_ID, caption, parse_mode=ParseMode.HTML)
+                                    print(f"📝 Отправлен текст: {title[:30]}...")
+                                
+                                history.add(link)
+                                new_links.append(link)
+                            except Exception as e:
+                                print(f"❌ Ошибка отправки: {e}")
+
+            except Exception as e:
+                print(f"⚠️ Ошибка чтения ленты {url}: {e}")
+
+    # Сохраняем новые ссылки
+    if new_links:
+        save_history(history)
+    else:
+        print("ℹ️ Новых новостей нет.")
 
     await bot.session.close()
-    print("💤 Работа завершена.")
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(fetch_and_post())
