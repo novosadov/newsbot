@@ -20,7 +20,7 @@ MAX_HISTORY = 200
 RSS_FEEDS = [
     ("Habr", "https://habr.com/ru/rss/all/new/"),
     ("Hi-news.ru", "https://hi-news.ru/feed"),
-    ("VC.ru", "https://vc.ru/feed"),
+    ("VC.ru", "https://vc.ru/rss"),
     ("TJournal", "https://tjournal.ru/feed"),
     ("CNews", "https://www.cnews.ru/news/index.rss"),
     ("iXBT", "https://www.ixbt.com/export/news.rss"), # Исправленная ссылка
