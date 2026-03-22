@@ -15,18 +15,18 @@ CHANNEL_ID = "@newstecnolojia"
 MEMORY_FILE = "sent_links.txt"
 MAX_HISTORY = 200
 
-# СПИСОК ИСТОЧНИКОВ (ТОЛЬКО РУССКИЙ СЕКТОР + ПРОВЕРЕННЫЕ ССЫЛКИ)
+# СПИСОК ИСТОЧНИКОВ
+# Примечание: Пробелы в конце строк теперь не страшны, код их обрежет автоматически.
 RSS_FEEDS = [
     ("Habr", "https://habr.com/ru/rss/all/new/"),
-    ("VC.ru", "https://vc.ru/feed"), # Основной фид, часто работает
+    ("VC.ru", "https://vc.ru/feed"),
     ("TJournal", "https://tjournal.ru/feed"),
     ("CNews", "https://www.cnews.ru/news/index.rss"),
-    ("iXBT", "https://www.ixbt.com/export/news.rss"),
-    ("3DNews", "https://www.3dnews.ru/news.rdf"),
+    ("iXBT", "https://www.ixbt.com/export/news.rss"), # Исправленная ссылка
+    ("3DNews", "https://3dnews.ru/news/rss"),         # Новая ссылка по запросу
     ("Overclockers", "https://overclockers.ru/rss/news.xml"),
     ("OpenNET", "https://www.opennet.ru/opennews/opennews_all.rss"),
-    ("CyberSecurity", "https://cybersecurity.ru/rss.php"), # Дополнительный источник
-    ("Roem", "https://roem.ru/feed/"), # Бизнес и IT
+    ("Roem", "https://roem.ru/feed/"),
 ]
 
 print(f"🇷🇺 ЗАПУСК БОТА (RU ONLY). Источников: {len(RSS_FEEDS)}")
@@ -35,18 +35,15 @@ print(f"🇷🇺 ЗАПУСК БОТА (RU ONLY). Источников: {len(RSS
 # ФИЛЬТР РУССКОГО ЯЗЫКА
 # ==========================================
 def has_cyrillic(text):
-    """Проверяет наличие хотя бы одной русской буквы"""
     return bool(re.search('[а-яА-ЯёЁ]', text))
 
 def is_russian_news(title, summary):
-    # Проверяем заголовок. Если нет русских букв - пропускаем сразу.
     if not has_cyrillic(title):
         return False
-    # Если заголовок русский, но описание совсем пустое - тоже ок, берем.
     return True
 
 # ==========================================
-# РАБОТА С ПАМЯТЬЮ
+# РАБОТА С ПАМЯТЬЮ (GIT)
 # ==========================================
 def load_history():
     if not os.path.exists(MEMORY_FILE):
@@ -93,19 +90,17 @@ async def fetch_and_post():
     history = load_history()
     new_count = 0
     
-    # Заголовки как у браузера, чтобы не блокировали
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
     async with aiohttp.ClientSession(headers=headers) as session:
         for source_name, url in RSS_FEEDS:
+            # ВАЖНО: Удаляем пробелы в начале и конце ссылки
+            clean_url = url.strip()
+            
             try:
-                # Таймаут 7 секунд на сайт
-                async with session.get(url, timeout=7) as response:
+                async with session.get(clean_url, timeout=7) as response:
                     if response.status == 200:
-                        # Читаем текст. Для OpenNET и других важна правильная кодировка
-                        content_type = response.headers.get('Content-Type', '')
-                        text = await response.text(errors='ignore') # Игнорируем битые байты
-                        
+                        text = await response.text(errors='ignore')
                         feed = feedparser.parse(text)
                         
                         # Берем топ-3 свежих с каждого источника
@@ -117,9 +112,8 @@ async def fetch_and_post():
                             title = entry.title
                             summary_raw = entry.get('summary', entry.get('description', ''))
 
-                            # === ФИЛЬТР ЯЗЫКА ===
+                            # Фильтр языка
                             if not is_russian_news(title, summary_raw):
-                                # print(f"⏭ [{source_name}] Пропущено (не русский): {title[:20]}")
                                 continue
 
                             # Чистка текста
@@ -134,25 +128,27 @@ async def fetch_and_post():
 
                             # Поиск картинки
                             photo_url = None
-                            # 1. media_content
                             if 'media_content' in entry:
                                 for m in entry['media_content']:
                                     if m.get('medium') == 'image' or m.get('type', '').startswith('image'):
                                         photo_url = m['url']
                                         break
-                            # 2. enclosures
                             if not photo_url and 'enclosures' in entry:
                                 for e in entry['enclosures']:
                                     if e.get('type', '').startswith('image'):
                                         photo_url = e['href']
                                         break
-                            # 3. Парсинг из HTML
                             if not photo_url:
                                 match = re.search(r'src=["\'](https?://[^"\']+?\.(?:jpg|jpeg|png|webp))["\']', summary_raw, re.I)
                                 if match:
                                     photo_url = match.group(1)
 
-                            caption = f"🏷 <b>{source_name}</b>\n\n🚀 <b>{title}</b>\n\n📝 {clean_summary}"
+                            # ФОРМИРОВАНИЕ СООБЩЕНИЯ
+                            # Убрали источник из начала, добавили ссылку в конец
+                            # Используем MarkdownV2 для надежной работы ссылок, или HTML как раньше. 
+                            # В HTML ссылка делается так: <a href='url'>текст</a>
+                            
+                            caption = f"🚀 <b>{title}</b>\n\n📝 {clean_summary}\n\n🔗 <a href='{link}'>Читать далее на сайте</a>"
                             
                             try:
                                 if photo_url:
@@ -167,17 +163,17 @@ async def fetch_and_post():
                             except Exception as e:
                                 print(f"❌ Ошибка отправки: {e}")
                     else:
-                        print(f"⚠️ [{source_name}] Ошибка доступа: {response.status}")
+                        print(f"⚠️ [{source_name}] Ошибка доступа: {response.status} (URL: {clean_url})")
             except asyncio.TimeoutError:
-                print(f"⏳ [{source_name}] Таймаут (сайт долго отвечает)")
+                print(f"⏳ [{source_name}] Таймаут")
             except Exception as e:
                 print(f"⚠️ [{source_name}] Критическая ошибка: {e}")
 
     if new_count > 0:
         save_history(history)
-        print(f"✅ УСПЕХ! Отправлено русских новостей: {new_count}")
+        print(f"✅ УСПЕХ! Отправлено новостей: {new_count}")
     else:
-        print("ℹ️ Новых русских новостей пока нет (или все повторятся).")
+        print("ℹ️ Новых новостей нет.")
 
     await bot.session.close()
 
