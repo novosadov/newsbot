@@ -21,7 +21,7 @@ RSS_FEEDS = [
     ("VC.ru", "https://vc.ru/feed"), # Основной фид, часто работает
     ("TJournal", "https://tjournal.ru/feed"),
     ("CNews", "https://www.cnews.ru/news/index.rss"),
-    ("iXBT", "https://www.ixbt.com/news/all/index.xml"),
+    ("iXBT", "https://www.ixbt.com/export/news.rss"),
     ("3DNews", "https://www.3dnews.ru/news.rdf"),
     ("Overclockers", "https://overclockers.ru/rss/news.xml"),
     ("OpenNET", "https://www.opennet.ru/opennews/opennews_all.rss"),
