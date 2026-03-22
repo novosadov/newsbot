@@ -4,6 +4,7 @@ import aiohttp
 import feedparser
 import re
 import subprocess
+import html  # Модуль для расшифровки &nbsp; &laquo; и т.д.
 from aiogram import Bot, types
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
@@ -112,17 +113,30 @@ async def fetch_and_post():
                             if not is_russian_news(title, summary_raw):
                                 continue
 
-                            # Чистка текста
-                            clean_summary = re.sub(r'<[^>]+>', '', summary_raw)
-                            clean_summary = re.sub(r'\s+', ' ', clean_summary).strip()
+                            # --- ОБРАБОТКА ТЕКСТА ---
                             
-                            if len(clean_summary) > 600:
-                                clean_summary = clean_summary[:597] + "..."
+                            # 1. Удаляем HTML теги (<b>, <p>, <img> и т.д.)
+                            clean_text = re.sub(r'<[^>]+>', '', summary_raw)
                             
-                            if not clean_summary:
-                                clean_summary = "Подробности в источнике."
+                            # 2. Расшифровываем HTML-сущности (&nbsp; -> пробел, &laquo; -> « и т.д.)
+                            # Это ключевое исправление!
+                            clean_text = html.unescape(clean_text)
+                            
+                            # 3. Убираем лишние пробелы (превращаем множественные пробелы в один)
+                            clean_text = re.sub(r'\s+', ' ', clean_text)
+                            
+                            # 4. Обрезаем по краям и по длине
+                            clean_text = clean_text.strip()
+                            if len(clean_text) > 600:
+                                clean_text = clean_text[:597] + "..."
+                            
+                            if not clean_text:
+                                clean_text = "Подробности в источнике."
 
-                            # Поиск картинки (ИСПРАВЛЕНО: проверка ключей)
+                            # Также чистим заголовок на всякий случай (там тоже могут быть сущности)
+                            clean_title = html.unescape(re.sub(r'<[^>]+>', '', title)).strip()
+
+                            # Поиск картинки
                             photo_url = None
                             
                             # 1. media_content
@@ -132,7 +146,7 @@ async def fetch_and_post():
                                         photo_url = m.get('url')
                                         break
                             
-                            # 2. enclosures (ИСПРАВЛЕНО: проверка наличия href)
+                            # 2. enclosures
                             if not photo_url and 'enclosures' in entry:
                                 for e in entry['enclosures']:
                                     if e.get('type', '').startswith('image') and 'href' in e:
@@ -145,37 +159,36 @@ async def fetch_and_post():
                                 if match:
                                     photo_url = match.group(1)
 
-                            caption = f"🚀 <b>{title}</b>\n\n📝 {clean_summary}\n\n🔗 <a href='{link}'>Читать далее на сайте</a>"
+                            # Формирование сообщения
+                            caption = f"🚀 <b>{clean_title}</b>\n\n📝 {clean_text}\n\n🔗 <a href='{link}'>Читать далее на сайте</a>"
                             
-                            # ОТПРАВКА С ЗАЩИТОЙ ОТ ОШИБОК ФОТО
+                            # ОТПРАВКА
                             sent = False
                             if photo_url:
                                 try:
                                     await bot.send_photo(CHANNEL_ID, photo=photo_url, caption=caption, parse_mode=ParseMode.HTML)
-                                    print(f"📸 [{source_name}] {title[:40]}...")
+                                    print(f"📸 [{source_name}] {clean_title[:40]}...")
                                     sent = True
                                 except TelegramBadRequest as e:
                                     if "wrong type of the web page content" in str(e):
-                                        # Если фото битое, пробуем отправить текстом
-                                        print(f"⚠️ [{source_name}] Картинка не подошла, отправляю текстом: {title[:30]}...")
+                                        print(f"⚠️ [{source_name}] Картинка битая, шлю текстом: {clean_title[:30]}...")
                                         try:
                                             await bot.send_message(CHANNEL_ID, caption, parse_mode=ParseMode.HTML)
                                             sent = True
                                         except Exception as inner_e:
                                             print(f"❌ Ошибка отправки текста: {inner_e}")
                                     else:
-                                        print(f"❌ Ошибка отправки фото: {e}")
+                                        print(f"❌ Ошибка фото: {e}")
                                 except Exception as e:
                                     print(f"❌ Неизвестная ошибка фото: {e}")
                             
-                            # Если фото не было или не отправилось, шлем текст
                             if not sent:
                                 try:
                                     await bot.send_message(CHANNEL_ID, caption, parse_mode=ParseMode.HTML)
-                                    print(f"📝 [{source_name}] {title[:40]}...")
+                                    print(f"📝 [{source_name}] {clean_title[:40]}...")
                                     sent = True
                                 except Exception as e:
-                                    print(f"❌ Ошибка отправки текста: {e}")
+                                    print(f"❌ Ошибка текста: {e}")
 
                             if sent:
                                 history.add(link)
