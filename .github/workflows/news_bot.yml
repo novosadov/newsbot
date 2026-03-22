@@ -2,7 +2,7 @@ name: News Bot Runner (RU)
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Каждые 5 минут
+    - cron: '*/1 * * * *' # Каждые 5 минут
   workflow_dispatch:
 
 permissions:
