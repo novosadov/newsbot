@@ -22,7 +22,7 @@ RSS_FEEDS = [
     ("Hi-news.ru", "https://hi-news.ru/feed"),
     ("VC.ru", "https://vc.ru/rss"),
     ("TJournal", "https://tjournal.ru/feed"),
-    ("CNews", "https://www.cnews.ru/news/index.rss"),
+    ("CNews", "https://www.cnews.ru/inc/rss/news.xml"),
     ("iXBT", "https://www.ixbt.com/export/news.rss"), # Исправленная ссылка
     ("3DNews", "https://3dnews.ru/news/rss"),         # Новая ссылка по запросу
     ("Overclockers", "https://overclockers.ru/rss/news.xml"),
