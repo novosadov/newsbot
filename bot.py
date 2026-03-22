@@ -20,12 +20,11 @@ MAX_HISTORY = 200
 RSS_FEEDS = [
     ("Habr", "https://habr.com/ru/rss/all/new/"),
     ("Hi-news.ru", "https://hi-news.ru/feed"),
+    ("Ferra.ru", "https://www.ferra.ru/exports/rss.xml"),
     ("VC.ru", "https://vc.ru/rss"),
-    ("TJournal", "https://tjournal.ru/feed"),
     ("CNews", "https://www.cnews.ru/inc/rss/news.xml"),
     ("iXBT", "https://www.ixbt.com/export/news.rss"), # Исправленная ссылка
     ("3DNews", "https://3dnews.ru/news/rss"),         # Новая ссылка по запросу
-    ("Overclockers", "https://overclockers.ru/rss/news.xml"),
     ("OpenNET", "https://www.opennet.ru/opennews/opennews_all.rss"),
     ("Roem", "https://roem.ru/feed/"),
 ]
