@@ -19,6 +19,7 @@ MAX_HISTORY = 200
 # Примечание: Пробелы в конце строк теперь не страшны, код их обрежет автоматически.
 RSS_FEEDS = [
     ("Habr", "https://habr.com/ru/rss/all/new/"),
+    ("Hi-news.ru", "https://hi-news.ru/feed"),
     ("VC.ru", "https://vc.ru/feed"),
     ("TJournal", "https://tjournal.ru/feed"),
     ("CNews", "https://www.cnews.ru/news/index.rss"),
